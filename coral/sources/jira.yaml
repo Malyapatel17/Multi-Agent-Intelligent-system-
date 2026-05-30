@@ -1,0 +1,200 @@
+dsl_version: 3
+name: jira
+version: 0.1.0
+description: >-
+  Query issues, sprint status, assignees, and priorities from Jira Cloud.
+backend: http
+
+inputs:
+  JIRA_BASE_URL:
+    kind: variable
+    hint: |
+      Base URL of your Jira Cloud site, e.g. `https://acme.atlassian.net`.
+      Find it in your browser's address bar when logged into Jira.
+  JIRA_EMAIL:
+    kind: variable
+    hint: |
+      Email address of the Atlassian account that owns the API token.
+  JIRA_API_TOKEN:
+    kind: secret
+    hint: |
+      Atlassian API token (not your password). Create one at
+      [Atlassian API token settings](https://id.atlassian.com/manage-profile/security/api-tokens).
+      Needs read access to the projects you want to query.
+
+base_url: "{{input.JIRA_BASE_URL}}"
+
+# Jira Cloud authenticates with HTTP Basic auth: the username is your account
+# email and the password is the API token. Coral encodes this for you.
+auth:
+  type: BasicAuth
+  username: "{{input.JIRA_EMAIL}}"
+  password: "{{input.JIRA_API_TOKEN}}"
+
+request_headers:
+  - name: Accept
+    from: literal
+    value: application/json
+
+# Smoke/connection check for `coral source test jira`.
+test_queries:
+  - SELECT key, summary FROM jira.issues WHERE jql = 'ORDER BY created DESC'
+
+tables:
+  - name: issues
+    description: Issues visible to the authenticated Jira user
+    guide: |
+      Requires a `jql` filter. Scope it with `project` or `created` clauses to
+      avoid heavy scans on large instances, e.g.
+      `jql = 'sprint in openSprints() AND project = ENG ORDER BY updated DESC'`.
+      `assignee_account_id` is a Jira account ID (not a Slack/email handle).
+    filters:
+      - name: jql
+        required: true
+      - name: expand
+        required: false
+    request:
+      method: GET
+      path: /rest/api/3/search/jql
+      query:
+        - name: jql
+          from: filter
+          key: jql
+        - name: expand
+          from: filter
+          key: expand
+        - name: fields
+          from: literal
+          value: summary,status,issuetype,assignee,priority,created,updated
+    response:
+      rows_path:
+        - issues
+      row_strategy: direct
+    pagination:
+      mode: cursor_query
+      cursor_param: nextPageToken
+      response_cursor_path:
+        - nextPageToken
+      page_size:
+        default: 50
+        max: 50
+        query_param: maxResults
+    columns:
+      - name: id
+        type: Utf8
+        nullable: false
+        description: Issue ID
+        expr:
+          kind: path
+          path:
+            - id
+      - name: key
+        type: Utf8
+        nullable: true
+        description: Issue key (e.g. ENG-123)
+        expr:
+          kind: path
+          path:
+            - key
+      - name: self
+        type: Utf8
+        nullable: true
+        description: Jira API URL for the issue
+        expr:
+          kind: path
+          path:
+            - self
+      - name: summary
+        type: Utf8
+        nullable: true
+        description: Issue summary
+        expr:
+          kind: path
+          path:
+            - fields
+            - summary
+      - name: status_name
+        type: Utf8
+        nullable: true
+        description: Current issue status (e.g. In Progress)
+        expr:
+          kind: path
+          path:
+            - fields
+            - status
+            - name
+      - name: issue_type_name
+        type: Utf8
+        nullable: true
+        description: Issue type name (e.g. Bug, Story)
+        expr:
+          kind: path
+          path:
+            - fields
+            - issuetype
+            - name
+      - name: assignee_account_id
+        type: Utf8
+        nullable: true
+        description: Assignee Jira account ID
+        expr:
+          kind: path
+          path:
+            - fields
+            - assignee
+            - accountId
+      - name: assignee_display_name
+        type: Utf8
+        nullable: true
+        description: Assignee display name
+        expr:
+          kind: path
+          path:
+            - fields
+            - assignee
+            - displayName
+      - name: priority_name
+        type: Utf8
+        nullable: true
+        description: Priority name (e.g. High)
+        expr:
+          kind: path
+          path:
+            - fields
+            - priority
+            - name
+      - name: created
+        type: Utf8
+        nullable: true
+        description: Creation timestamp (ISO 8601)
+        expr:
+          kind: path
+          path:
+            - fields
+            - created
+      - name: updated
+        type: Utf8
+        nullable: true
+        description: Last update timestamp (ISO 8601)
+        expr:
+          kind: path
+          path:
+            - fields
+            - updated
+      # Virtual columns expose the filters as selectable/where-able names.
+      - name: jql
+        type: Utf8
+        nullable: true
+        virtual: true
+        description: JQL query string (required filter)
+        expr:
+          kind: from_filter
+          key: jql
+      - name: expand
+        type: Utf8
+        nullable: true
+        virtual: true
+        description: Optional Jira expand parameter
+        expr:
+          kind: from_filter
+          key: expand

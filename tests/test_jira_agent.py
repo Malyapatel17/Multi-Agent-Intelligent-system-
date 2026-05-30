@@ -32,3 +32,19 @@ async def test_jira_agent_handles_coral_error_gracefully():
 
     assert update["jira_context"] == ""
     assert any("jira" in e.lower() for e in update["errors"])
+
+
+async def test_jira_agent_queries_open_sprint_via_jql_filter(fake_llm):
+    # The Coral jira source requires a `jql` filter; the agent must target the
+    # open sprint through it (not a free-form `sprint = 'active'` clause).
+    coral = FakeCoral(rows=[{"key": "DEV-1"}])
+    node = make_jira_agent(coral, fake_llm)
+
+    await node({"user_id": "U123"})
+
+    query = coral.queries[0]
+    assert "jql" in query
+    assert "openSprints" in query
+    # Uses the source's real column names.
+    assert "status_name" in query
+    assert "assignee_display_name" in query

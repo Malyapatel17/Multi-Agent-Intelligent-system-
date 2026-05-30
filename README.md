@@ -50,6 +50,11 @@ A multi-agent system that gives developers instant, context-rich intelligence fr
 ### 2. Coral SQL Layer
 Coral provides a unified SQL interface over all APIs — no ETL, no glue code. Each agent queries Jira, GitHub, or Sentry using plain SQL through Coral MCP tools.
 
+**Source specs** live in [`coral/`](coral/). ✅ **Bonus delivered:**
+[`coral/sources/jira.yaml`](coral/sources/jira.yaml) defines the `jira.issues`
+table (Jira Cloud, Basic auth, JQL filter, cursor pagination) that powers the
+Jira agent. See [`coral/README.md`](coral/README.md) for setup and validation.
+
 ### 3. Specialized Agents
 | Agent | Responsibility | Data Used |
 |-------|---------------|-----------|
@@ -153,6 +158,22 @@ uvicorn app.main:app --reload
 | POST | `/webhooks/sentry` | Sentry error events (event-driven) |
 | POST | `/slack/command` | Slack slash commands `/standup`, `/bug`, `/pr` (on-demand) |
 
+## Security
+
+All three POST endpoints verify the inbound request signature before doing any
+work (HMAC-SHA256, constant-time comparison):
+
+| Provider | Header | Scheme |
+|----------|--------|--------|
+| Slack | `X-Slack-Signature` + `X-Slack-Request-Timestamp` | `v0=<hmac>` over `v0:{ts}:{body}`, 5-min replay window |
+| GitHub | `X-Hub-Signature-256` | `sha256=<hmac>` over raw body |
+| Sentry | `Sentry-Hook-Signature` | bare hex `<hmac>` over raw body |
+
+Verification is **skipped when the corresponding secret is unset** (`.env`),
+so local development and tests run without signatures. Set
+`SLACK_SIGNING_SECRET`, `GITHUB_WEBHOOK_SECRET`, and `SENTRY_WEBHOOK_SECRET`
+in production to enforce it.
+
 ## Project Layout
 
 ```
@@ -166,6 +187,7 @@ app/
 ├── llm.py             # Claude wrapper
 ├── slack.py           # Slack delivery
 ├── ingest.py          # Webhook / slash-command parsers
+├── security.py        # Slack / GitHub / Sentry signature verification
 └── agents/            # jira, pr, sentry, standup_builder, formatter
 tests/                 # Full pytest suite (TDD)
 ```

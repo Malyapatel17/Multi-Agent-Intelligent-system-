@@ -17,14 +17,23 @@ SYSTEM_PROMPT = (
 )
 
 
+def _build_jql(state: GraphState) -> str:
+    """Build the JQL string for the active sprint.
+
+    NOTE: ``state['user_id']`` is a *Slack* user ID, not a Jira accountId, so we
+    do not filter by assignee yet. A future Slack->Jira identity map would add
+    an ``AND assignee = '<accountId>'`` clause here.
+    """
+    return "sprint in openSprints() ORDER BY updated DESC"
+
+
 def _build_query(state: GraphState) -> str:
-    user_id = state.get("user_id")
-    where = "sprint = 'active'"
-    if user_id:
-        where += f" AND assignee = '{user_id}'"
+    # The Coral `jira` source (coral/sources/jira.yaml) exposes a JQL-filtered
+    # `issues` table; `jql` is a required filter. Column names match the source.
+    jql = _build_jql(state).replace("'", "''")
     return (
-        "SELECT key, summary, status, assignee, updated "
-        f"FROM jira.issues WHERE {where} ORDER BY updated DESC"
+        "SELECT key, summary, status_name, assignee_display_name, updated "
+        f"FROM jira.issues WHERE jql = '{jql}'"
     )
 
 
