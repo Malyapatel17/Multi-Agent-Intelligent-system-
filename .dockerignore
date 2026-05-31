@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Local config / secrets — never bake these into an image
+.env
+*.env
+!.env.example
+
+# Tests & dev-only files (not needed at runtime)
+tests/
+requirements-dev.txt
+
+# Tooling / VCS
+.git/
+.github/
+.gitignore
+*.md
+docs/
+
+# OS cruft
+.DS_Store
+Thumbs.db

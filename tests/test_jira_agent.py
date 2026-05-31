@@ -48,3 +48,25 @@ async def test_jira_agent_queries_open_sprint_via_jql_filter(fake_llm):
     # Uses the source's real column names.
     assert "status_name" in query
     assert "assignee_display_name" in query
+
+
+async def test_jira_agent_scopes_to_assignee_when_identity_resolved(fake_llm):
+    # When the supervisor resolved the triggering user's Jira accountId, the JQL
+    # narrows to that assignee.
+    coral = FakeCoral(rows=[{"key": "DEV-1"}])
+    node = make_jira_agent(coral, fake_llm)
+
+    await node({"user_id": "U123", "jira_account_id": "557058:abc"})
+
+    query = coral.queries[0]
+    assert "assignee =" in query
+    assert "557058:abc" in query
+
+
+async def test_jira_agent_no_assignee_clause_without_identity(fake_llm):
+    coral = FakeCoral(rows=[{"key": "DEV-1"}])
+    node = make_jira_agent(coral, fake_llm)
+
+    await node({"user_id": "U123"})
+
+    assert "assignee =" not in coral.queries[0]

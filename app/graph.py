@@ -26,6 +26,7 @@ from app.agents.pr_agent import make_pr_agent
 from app.agents.sentry_agent import make_sentry_agent
 from app.agents.standup_builder import make_standup_builder
 from app.coral import CoralClient
+from app.identity import IdentityMap
 from app.llm import LLM
 from app.state import GraphState
 from app.supervisor import make_supervisor
@@ -41,11 +42,11 @@ def _route_from_supervisor(state: GraphState):
     return [Send(agent, state) for agent in data_agents]
 
 
-def build_graph(coral: CoralClient, llm: LLM):
+def build_graph(coral: CoralClient, llm: LLM, identity: IdentityMap | None = None):
     """Build and compile the dev intelligence graph with injected deps."""
     builder = StateGraph(GraphState)
 
-    builder.add_node("supervisor", make_supervisor(llm))
+    builder.add_node("supervisor", make_supervisor(llm, identity))
     builder.add_node("jira_agent", make_jira_agent(coral, llm))
     builder.add_node("pr_agent", make_pr_agent(coral, llm))
     builder.add_node("sentry_agent", make_sentry_agent(coral, llm))

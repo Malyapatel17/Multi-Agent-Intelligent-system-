@@ -1,4 +1,5 @@
 """Tests for the Supervisor routing node."""
+from app.identity import IdentityMap
 from app.supervisor import make_supervisor
 from tests.conftest import FakeLLM
 
@@ -47,3 +48,25 @@ async def test_unknown_classification_selects_no_agents():
 
     assert update["event_type"] == "unknown"
     assert update["selected_agents"] == []
+
+
+async def test_supervisor_resolves_triggering_user_identity():
+    identity = IdentityMap(
+        slack_to_jira={"U1": "557058:abc"},
+        slack_to_github={"U1": "octocat"},
+    )
+    node = make_supervisor(FakeLLM(), identity)
+
+    update = await node({"event_type": "standup", "user_id": "U1"})
+
+    assert update["jira_account_id"] == "557058:abc"
+    assert update["github_login"] == "octocat"
+
+
+async def test_supervisor_omits_identity_for_unmapped_user():
+    node = make_supervisor(FakeLLM(), IdentityMap(slack_to_jira={"U1": "x"}))
+
+    update = await node({"event_type": "standup", "user_id": "U-unknown"})
+
+    assert "jira_account_id" not in update
+    assert "github_login" not in update

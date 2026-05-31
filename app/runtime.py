@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from app.coral import CoralClient
 from app.graph import build_graph
+from app.identity import load_identity_map
 from app.llm import AnthropicLLM
 from app.slack import SlackNotifier
 
@@ -29,6 +30,7 @@ def build_runtime() -> Runtime:
     """Construct the production runtime from environment configuration."""
     coral = CoralClient()
     llm = AnthropicLLM()
-    graph = build_graph(coral, llm)
+    identity = load_identity_map()
+    graph = build_graph(coral, llm, identity)
     notifier = SlackNotifier()
     return Runtime(graph, notifier)

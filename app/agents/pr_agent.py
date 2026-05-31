@@ -6,6 +6,7 @@ webhook — and summarizes review status, reviewers, and related work.
 from __future__ import annotations
 
 from app.agents._common import error_update, format_rows
+from app.config import get_settings
 from app.coral import CoralClient, CoralError
 from app.llm import LLM
 from app.state import GraphState
@@ -18,18 +19,26 @@ SYSTEM_PROMPT = (
 
 
 def _build_query(state: GraphState) -> str:
+    # owner/repo are required by the GitHub API and configured per deployment
+    # (coral/sources/github.yaml). A future enhancement would read them from the
+    # webhook payload to support multiple repos.
+    cfg = get_settings()
+    where = [f"owner = '{cfg.github_owner}'", f"repo = '{cfg.github_repo}'"]
+
     pr_number = (state.get("raw_payload") or {}).get("pr_number")
-    base = (
-        "SELECT number, title, author, state, requested_reviewers, updated "
-        "FROM github.pulls"
-    )
     if pr_number is not None:
-        return f"{base} WHERE number = {int(pr_number)}"
-    user_id = state.get("user_id")
-    where = "state = 'open'"
-    if user_id:
-        where += f" AND author = '{user_id}'"
-    return f"{base} WHERE {where} ORDER BY updated DESC"
+        where.append(f"number = {int(pr_number)}")
+    else:
+        where.append("state = 'open'")
+        # Scope to the triggering user's PRs when the supervisor resolved their
+        # GitHub login (Coral applies this predicate over the returned rows).
+        github_login = state.get("github_login")
+        if github_login:
+            where.append(f"author_login = '{github_login}'")
+    return (
+        "SELECT number, title, state, author_login, requested_reviewers, updated_at "
+        "FROM github.pulls WHERE " + " AND ".join(where) + " ORDER BY updated_at DESC"
+    )
 
 
 def make_pr_agent(coral: CoralClient, llm: LLM):

@@ -1,0 +1,260 @@
+dsl_version: 3
+name: github
+version: 0.1.0
+description: >-
+  Query pull requests and commit history (authors, messages) from GitHub.
+backend: http
+
+inputs:
+  GITHUB_API_BASE:
+    kind: variable
+    default: https://api.github.com
+    hint: |
+      GitHub REST API base URL. Use `https://api.github.com` for github.com,
+      or `https://<host>/api/v3` for GitHub Enterprise Server.
+  GITHUB_TOKEN:
+    kind: secret
+    hint: |
+      GitHub token with `repo` (or fine-grained "Pull requests: read" +
+      "Contents: read") scope. If you use the GitHub CLI, run `gh auth token`.
+      See [GitHub PAT docs](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens).
+
+base_url: "{{input.GITHUB_API_BASE}}"
+
+auth:
+  type: HeaderAuth
+  headers:
+    - name: Authorization
+      from: template
+      template: Bearer {{input.GITHUB_TOKEN}}
+
+request_headers:
+  - name: Accept
+    from: literal
+    value: application/vnd.github+json
+  - name: X-GitHub-Api-Version
+    from: literal
+    value: "2022-11-28"
+
+test_queries:
+  - SELECT number, title, state FROM github.pulls WHERE owner = 'withcoral' AND repo = 'coral' AND state = 'open'
+
+tables:
+  - name: pulls
+    description: Pull requests for a repository
+    guide: |
+      Requires `owner` and `repo`. Defaults to open PRs; pass `state` =
+      open|closed|all to widen. Filter `WHERE number = <n>` to pick one PR
+      out of the returned list.
+    filters:
+      - name: owner
+        required: true
+      - name: repo
+        required: true
+      - name: state
+        required: false
+    request:
+      method: GET
+      path: /repos/{{filter.owner}}/{{filter.repo}}/pulls
+      query:
+        - name: state
+          from: filter
+          key: state
+          default: open
+        - name: sort
+          from: literal
+          value: updated
+        - name: direction
+          from: literal
+          value: desc
+    response:
+      row_strategy: direct
+    pagination:
+      mode: link_header
+      page_size:
+        default: 30
+        max: 100
+        query_param: per_page
+    columns:
+      - name: number
+        type: Int64
+        nullable: false
+        description: PR number
+        expr:
+          kind: path
+          path:
+            - number
+      - name: title
+        type: Utf8
+        nullable: true
+        description: PR title
+        expr:
+          kind: path
+          path:
+            - title
+      - name: state
+        type: Utf8
+        nullable: true
+        description: open or closed
+        expr:
+          kind: path
+          path:
+            - state
+      - name: author_login
+        type: Utf8
+        nullable: true
+        description: GitHub login of the PR author
+        expr:
+          kind: path
+          path:
+            - user
+            - login
+      - name: requested_reviewers
+        type: Json
+        nullable: true
+        description: Reviewers requested on the PR
+        expr:
+          kind: path
+          path:
+            - requested_reviewers
+      - name: html_url
+        type: Utf8
+        nullable: true
+        description: Web URL of the PR
+        expr:
+          kind: path
+          path:
+            - html_url
+      - name: updated_at
+        type: Utf8
+        nullable: true
+        description: Last update timestamp (ISO 8601)
+        expr:
+          kind: path
+          path:
+            - updated_at
+      - name: owner
+        type: Utf8
+        nullable: true
+        virtual: true
+        description: Repository owner (required filter)
+        expr:
+          kind: from_filter
+          key: owner
+      - name: repo
+        type: Utf8
+        nullable: true
+        virtual: true
+        description: Repository name (required filter)
+        expr:
+          kind: from_filter
+          key: repo
+
+  - name: commits
+    description: Commit history for a repository, optionally scoped to a file
+    guide: |
+      Requires `owner` and `repo`. Pass `path` = '<file>' to get the commits
+      that touched a file, newest first — the top row is the most recent
+      author of that file (a practical stand-in for line blame, which the
+      GitHub REST API does not provide).
+    filters:
+      - name: owner
+        required: true
+      - name: repo
+        required: true
+      - name: path
+        required: false
+    request:
+      method: GET
+      path: /repos/{{filter.owner}}/{{filter.repo}}/commits
+      query:
+        - name: path
+          from: filter
+          key: path
+    response:
+      row_strategy: direct
+    pagination:
+      mode: link_header
+      page_size:
+        default: 30
+        max: 100
+        query_param: per_page
+    columns:
+      - name: sha
+        type: Utf8
+        nullable: false
+        description: Commit SHA
+        expr:
+          kind: path
+          path:
+            - sha
+      - name: author_name
+        type: Utf8
+        nullable: true
+        description: Commit author name
+        expr:
+          kind: path
+          path:
+            - commit
+            - author
+            - name
+      - name: author_login
+        type: Utf8
+        nullable: true
+        description: GitHub login of the commit author
+        expr:
+          kind: path
+          path:
+            - author
+            - login
+      - name: committed_at
+        type: Utf8
+        nullable: true
+        description: Commit author date (ISO 8601)
+        expr:
+          kind: path
+          path:
+            - commit
+            - author
+            - date
+      - name: message
+        type: Utf8
+        nullable: true
+        description: Commit message
+        expr:
+          kind: path
+          path:
+            - commit
+            - message
+      - name: html_url
+        type: Utf8
+        nullable: true
+        description: Web URL of the commit
+        expr:
+          kind: path
+          path:
+            - html_url
+      - name: owner
+        type: Utf8
+        nullable: true
+        virtual: true
+        description: Repository owner (required filter)
+        expr:
+          kind: from_filter
+          key: owner
+      - name: repo
+        type: Utf8
+        nullable: true
+        virtual: true
+        description: Repository name (required filter)
+        expr:
+          kind: from_filter
+          key: repo
+      - name: path
+        type: Utf8
+        nullable: true
+        virtual: true
+        description: File path to scope commit history to
+        expr:
+          kind: from_filter
+          key: path

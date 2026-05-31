@@ -50,10 +50,22 @@ A multi-agent system that gives developers instant, context-rich intelligence fr
 ### 2. Coral SQL Layer
 Coral provides a unified SQL interface over all APIs — no ETL, no glue code. Each agent queries Jira, GitHub, or Sentry using plain SQL through Coral MCP tools.
 
-**Source specs** live in [`coral/`](coral/). ✅ **Bonus delivered:**
-[`coral/sources/jira.yaml`](coral/sources/jira.yaml) defines the `jira.issues`
-table (Jira Cloud, Basic auth, JQL filter, cursor pagination) that powers the
-Jira agent. See [`coral/README.md`](coral/README.md) for setup and validation.
+The app reaches Coral by launching the CLI as an **MCP stdio subprocess**
+(`coral mcp-stdio`) and calling its `sql` tool — there is no HTTP endpoint. The
+transport lives in [`app/coral.py`](app/coral.py) behind an injectable
+`CoralTransport` protocol, so the whole system tests against a fake.
+
+**Source specs** live in [`coral/`](coral/) — one per data source, so the agents
+run on real data instead of illustrative SQL:
+
+| Spec | Tables | Powers |
+|------|--------|--------|
+| [`jira.yaml`](coral/sources/jira.yaml) ⭐ | `jira.issues` (JQL, cursor pages) | Jira agent |
+| [`github.yaml`](coral/sources/github.yaml) | `github.pulls`, `github.commits` | PR agent + Sentry owner lookup |
+| [`sentry.yaml`](coral/sources/sentry.yaml) | `sentry.issues` | Sentry agent |
+
+⭐ = the bonus from the architecture diagram. See [`coral/README.md`](coral/README.md)
+for setup and validation of each.
 
 ### 3. Specialized Agents
 | Agent | Responsibility | Data Used |
@@ -97,9 +109,9 @@ The supervisor is the single entry point for all requests. It classifies the inc
 | Agent Orchestration | [LangGraph](https://github.com/langchain-ai/langgraph) |
 | API Server | FastAPI (Python) |
 | LLM | Claude claude-sonnet-4-6 (Anthropic) |
-| Data Access | Coral MCP (SQL over Jira, GitHub, Sentry) |
+| Data Access | Coral MCP (SQL over Jira, GitHub, Sentry) via `coral mcp-stdio` |
 | Output | Slack SDK (Python) |
-| Language | Python 3.11+ |
+| Language | Python 3.10+ |
 
 ## Workflow
 
@@ -188,9 +200,25 @@ app/
 ├── slack.py           # Slack delivery
 ├── ingest.py          # Webhook / slash-command parsers
 ├── security.py        # Slack / GitHub / Sentry signature verification
+├── identity.py        # Slack user → Jira accountId / GitHub login mapping
 └── agents/            # jira, pr, sentry, standup_builder, formatter
 tests/                 # Full pytest suite (TDD)
 ```
+
+## Per-user scoping (identity map)
+
+A Slack user ID is not a Jira `accountId` or a GitHub login, so to answer "what's
+in *my* sprint?" the supervisor translates the triggering Slack user via
+[`app/identity.py`](app/identity.py) and writes the resolved IDs into state.
+The Jira and PR agents then narrow their queries (`assignee = …`,
+`author_login = …`). Configure the map with the `IDENTITY_MAP` env var (JSON);
+unmapped users transparently fall back to unscoped queries.
+
+## Deployment
+
+See [`docs/deployment.md`](docs/deployment.md) for Docker/host setup, exposing a
+public URL, loading the Coral sources, and registering the Slack/GitHub/Sentry
+endpoints.
 
 ## Design Spec
 

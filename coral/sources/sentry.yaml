@@ -1,0 +1,168 @@
+dsl_version: 3
+name: sentry
+version: 0.1.0
+description: >-
+  Query error issues, their culprit, and faulting file metadata from Sentry.
+backend: http
+
+inputs:
+  SENTRY_ORG:
+    kind: variable
+    hint: |
+      Your Sentry organization slug (the part of the Sentry URL after
+      `/organizations/`).
+  SENTRY_TOKEN:
+    kind: secret
+    hint: |
+      Sentry auth token with `org:read`, `project:read`, and `event:read`
+      scopes. Create one via an internal integration —
+      see [Sentry auth token docs](https://docs.sentry.io/api/guides/create-auth-token/).
+
+base_url: https://sentry.io
+
+auth:
+  type: HeaderAuth
+  headers:
+    - name: Authorization
+      from: template
+      template: Bearer {{input.SENTRY_TOKEN}}
+
+test_queries:
+  - SELECT id, title FROM sentry.issues WHERE query = '' LIMIT 1
+
+tables:
+  - name: issues
+    description: Error issues across a Sentry organization
+    guide: |
+      Filter by `project` (the project slug) and optionally a Sentry search
+      `query`. To inspect one issue, also filter `WHERE id = '<issue_id>'`.
+      `metadata_filename` carries the faulting file when Sentry captured it —
+      join it to `github.commits.path` to find the likely owner.
+    filters:
+      - name: project
+        required: false
+      - name: query
+        required: false
+    request:
+      method: GET
+      path: /api/0/organizations/{{input.SENTRY_ORG}}/issues/
+      query:
+        - name: project
+          from: filter
+          key: project
+        - name: query
+          from: filter
+          key: query
+          default: ""
+    response:
+      row_strategy: direct
+    pagination:
+      mode: link_header
+      link_header_require_results: true
+    columns:
+      - name: id
+        type: Utf8
+        nullable: false
+        description: Issue ID
+        expr:
+          kind: path
+          path:
+            - id
+      - name: short_id
+        type: Utf8
+        nullable: true
+        description: Human-readable issue identifier (e.g. PROJECT-123)
+        expr:
+          kind: path
+          path:
+            - shortId
+      - name: title
+        type: Utf8
+        nullable: false
+        description: Issue title
+        expr:
+          kind: path
+          path:
+            - title
+      - name: culprit
+        type: Utf8
+        nullable: true
+        description: Where the error originates (module/function)
+        expr:
+          kind: path
+          path:
+            - culprit
+      - name: level
+        type: Utf8
+        nullable: true
+        description: Severity level (error, warning, ...)
+        expr:
+          kind: path
+          path:
+            - level
+      - name: status
+        type: Utf8
+        nullable: true
+        description: Issue status (unresolved, resolved, ignored)
+        expr:
+          kind: path
+          path:
+            - status
+      - name: count
+        type: Int64
+        nullable: true
+        description: Total event count for the issue
+        expr:
+          kind: path
+          path:
+            - count
+      - name: permalink
+        type: Utf8
+        nullable: true
+        description: Web URL of the issue
+        expr:
+          kind: path
+          path:
+            - permalink
+      - name: last_seen
+        type: Utf8
+        nullable: true
+        description: Timestamp the issue was last seen (ISO 8601)
+        expr:
+          kind: path
+          path:
+            - lastSeen
+      - name: metadata_filename
+        type: Utf8
+        nullable: true
+        description: Faulting file path, when Sentry captured it
+        expr:
+          kind: path
+          path:
+            - metadata
+            - filename
+      - name: metadata_type
+        type: Utf8
+        nullable: true
+        description: Error type/class
+        expr:
+          kind: path
+          path:
+            - metadata
+            - type
+      - name: project
+        type: Utf8
+        nullable: true
+        virtual: true
+        description: Project slug (filter)
+        expr:
+          kind: from_filter
+          key: project
+      - name: query
+        type: Utf8
+        nullable: true
+        virtual: true
+        description: Sentry search query (filter)
+        expr:
+          kind: from_filter
+          key: query

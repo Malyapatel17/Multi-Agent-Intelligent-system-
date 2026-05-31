@@ -1,7 +1,28 @@
 """Tests for the Coral SQL tool layer."""
 import pytest
 
-from app.coral import CoralClient, CoralError
+from app.coral import (
+    CoralClient,
+    CoralError,
+    _rows_from_result,
+    _coerce_rows,
+)
+
+
+class FakeText:
+    """Mimics an MCP TextContent block."""
+
+    def __init__(self, text):
+        self.text = text
+
+
+class FakeToolResult:
+    """Mimics an MCP CallToolResult."""
+
+    def __init__(self, content=None, structuredContent=None, isError=False):
+        self.content = content or []
+        self.structuredContent = structuredContent
+        self.isError = isError
 
 
 class FakeTransport:
@@ -47,3 +68,34 @@ async def test_sql_wraps_transport_errors_in_coral_error():
         await client.sql("SELECT 1")
 
     assert "connection refused" in str(exc_info.value)
+
+
+# --- MCP result parsing (Coral `sql` tool returns `coral sql --format json`) ---
+
+def test_rows_from_result_parses_json_array_text():
+    result = FakeToolResult(content=[FakeText('[{"key": "ENG-1"}]')])
+    assert _rows_from_result(result) == [{"key": "ENG-1"}]
+
+
+def test_rows_from_result_prefers_structured_content():
+    result = FakeToolResult(
+        content=[FakeText("ignored")],
+        structuredContent=[{"key": "ENG-2"}],
+    )
+    assert _rows_from_result(result) == [{"key": "ENG-2"}]
+
+
+def test_rows_from_result_empty_text_is_empty_list():
+    assert _rows_from_result(FakeToolResult(content=[FakeText("")])) == []
+
+
+def test_rows_from_result_raises_on_non_json():
+    result = FakeToolResult(content=[FakeText("not json at all")])
+    with pytest.raises(CoralError):
+        _rows_from_result(result)
+
+
+def test_coerce_rows_unwraps_rows_key():
+    assert _coerce_rows({"rows": [{"a": 1}]}) == [{"a": 1}]
+    assert _coerce_rows([{"a": 1}]) == [{"a": 1}]
+    assert _coerce_rows({"unexpected": 1}) is None

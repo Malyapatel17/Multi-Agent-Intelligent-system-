@@ -40,6 +40,10 @@ class GraphState(TypedDict, total=False):
     user_id: str            # Slack user who triggered (on-demand)
     slack_channel: str      # where to post the output
 
+    # --- Resolved provider identities (set by the supervisor via IdentityMap) ---
+    jira_account_id: str    # triggering user's Jira accountId, if mapped
+    github_login: str       # triggering user's GitHub login, if mapped
+
     # --- Supervisor decision ---
     selected_agents: list[AgentName]
 

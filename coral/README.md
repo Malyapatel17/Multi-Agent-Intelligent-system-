@@ -5,8 +5,10 @@ specs that expose the system's external data as SQL. The agents query these
 tables through Coral — they never call Jira/GitHub/Sentry APIs directly.
 
 > **Where credentials live:** source credentials (e.g. your Jira API token) are
-> configured in **Coral's** environment, not this app's `.env`. The app only
-> needs `CORAL_MCP_URL` / `CORAL_API_KEY` to reach Coral.
+> configured in **Coral's** environment, not this app's `.env`. The app reaches
+> Coral by launching the CLI as an MCP stdio subprocess (`coral mcp-stdio`) and
+> calling its `sql` tool — see `CORAL_COMMAND` / `CORAL_ARGS` / `CORAL_CWD` in
+> `.env.example` and [`app/coral.py`](../app/coral.py).
 
 ## `sources/jira.yaml` — Jira Cloud
 
@@ -58,8 +60,57 @@ avoid heavy scans, e.g. `... AND project = ENG ORDER BY updated DESC`.
 > standalone spec is scoped to exactly what the Jira agent needs (issues), so it
 > can be loaded with a single `coral source add --file` and reviewed in one place.
 
-## Adding more sources
+## `sources/github.yaml` — GitHub
 
-GitHub and Sentry currently use illustrative SQL in their agents. To make them
-live, author `sources/github.yaml` and `sources/sentry.yaml` the same way (both
-have official references in the Coral repo under `sources/core/`).
+Powers [`pr_agent.py`](../app/agents/pr_agent.py) and the commit-history step of
+[`sentry_agent.py`](../app/agents/sentry_agent.py).
+
+| Item | Value |
+|------|-------|
+| Auth | `Authorization: Bearer <GITHUB_TOKEN>` |
+| Tables | `github.pulls`, `github.commits` |
+| Required filters | `owner`, `repo` (the API needs them in the path) |
+| Pagination | Link header |
+
+```sh
+export GITHUB_API_BASE="https://api.github.com"   # or https://<host>/api/v3
+export GITHUB_TOKEN="$(gh auth token)"            # or a PAT with repo scope
+coral source lint ./coral/sources/github.yaml
+coral source add --file ./coral/sources/github.yaml
+coral sql "SELECT number, title, state, author_login FROM github.pulls
+           WHERE owner='withcoral' AND repo='coral' AND state='open' LIMIT 5"
+```
+
+> **No line blame:** GitHub REST has no per-line blame endpoint. The Sentry
+> agent instead reads `github.commits WHERE path='<file>'` (newest commit =
+> likely owner).
+
+## `sources/sentry.yaml` — Sentry
+
+Powers the error-lookup step of [`sentry_agent.py`](../app/agents/sentry_agent.py).
+
+| Item | Value |
+|------|-------|
+| Auth | `Authorization: Bearer <SENTRY_TOKEN>` |
+| Table | `sentry.issues` |
+| Filters | `project`, `query` (Sentry search); filter `WHERE id='<issue_id>'` for one issue |
+| Pagination | Link header |
+
+```sh
+export SENTRY_ORG="your-org-slug"
+export SENTRY_TOKEN="<sentry-auth-token>"   # scopes: org:read, project:read, event:read
+coral source lint ./coral/sources/sentry.yaml
+coral source add --file ./coral/sources/sentry.yaml
+coral sql "SELECT id, title, culprit, metadata_filename FROM sentry.issues
+           WHERE project='my-project' LIMIT 5"
+```
+
+## Which repo/project the agents query
+
+GitHub and Sentry APIs require an `owner`/`repo`/`project`. The agents read these
+from the **app's** config (`GITHUB_OWNER`, `GITHUB_REPO`, `SENTRY_PROJECT` in
+`.env`) and inject them into the SQL. The source **credentials** (tokens) live in
+Coral's environment; the repo/project selection lives in the app.
+
+> Coral ships broader official `github` and `sentry` core sources too. These
+> standalone specs are intentionally scoped to just the tables the agents use.

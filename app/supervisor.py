@@ -7,6 +7,7 @@ Free-form on-demand text is classified by Claude.
 """
 from __future__ import annotations
 
+from app.identity import IdentityMap
 from app.llm import LLM
 from app.state import AgentName, EventType, GraphState
 
@@ -39,8 +40,14 @@ def _normalize(label: str) -> EventType:
     return cleaned if cleaned in _VALID_EVENTS else "unknown"  # type: ignore[return-value]
 
 
-def make_supervisor(llm: LLM):
-    """Return the supervisor LangGraph node."""
+def make_supervisor(llm: LLM, identity: IdentityMap | None = None):
+    """Return the supervisor LangGraph node.
+
+    ``identity`` translates the triggering Slack user into provider identities
+    (Jira accountId, GitHub login) so downstream agents can scope their queries.
+    Defaults to an empty map (no per-user scoping).
+    """
+    identity = identity or IdentityMap()
 
     async def supervisor(state: GraphState) -> dict:
         event_type = state.get("event_type")
@@ -53,9 +60,21 @@ def make_supervisor(llm: LLM):
             )
             event_type = _normalize(classified)
 
-        return {
+        update: dict = {
             "event_type": event_type,
             "selected_agents": ROUTING.get(event_type, []),
         }
+
+        # Resolve the triggering Slack user to provider identities so agents can
+        # scope to "my tickets / my PRs". Only set keys we actually resolve.
+        user_id = state.get("user_id", "")
+        jira_account_id = identity.jira_account_id(user_id)
+        if jira_account_id:
+            update["jira_account_id"] = jira_account_id
+        github_login = identity.github_login(user_id)
+        if github_login:
+            update["github_login"] = github_login
+
+        return update
 
     return supervisor

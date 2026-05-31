@@ -20,11 +20,15 @@ SYSTEM_PROMPT = (
 def _build_jql(state: GraphState) -> str:
     """Build the JQL string for the active sprint.
 
-    NOTE: ``state['user_id']`` is a *Slack* user ID, not a Jira accountId, so we
-    do not filter by assignee yet. A future Slack->Jira identity map would add
-    an ``AND assignee = '<accountId>'`` clause here.
+    When the supervisor resolved the triggering Slack user to a Jira accountId
+    (via the IdentityMap), scope to that assignee — otherwise summarize the whole
+    active sprint.
     """
-    return "sprint in openSprints() ORDER BY updated DESC"
+    clauses = ["sprint in openSprints()"]
+    account_id = state.get("jira_account_id")
+    if account_id:
+        clauses.append(f"assignee = '{account_id}'")
+    return " AND ".join(clauses) + " ORDER BY updated DESC"
 
 
 def _build_query(state: GraphState) -> str:
